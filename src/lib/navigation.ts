@@ -92,9 +92,9 @@ export const pathFromSegments = (segs: readonly string[]): string => segs.filter
 // The host-drawn spaces strip grants this instance a scoped `ro` navigation
 // root per picked space, announced mid-task as an ordinary mount-add. The app
 // learns of it through `useMounts()`: a strip grant is recognizably a
-// firestore mount carrying its spaceId as `id` (the picker's own repo mount is
-// type `repo`, and it holds no other space grants — anything matching IS a
-// strip grant).
+// firestore mount carrying its spaceId as `id` (the pasted repo arrives typed
+// `github` via the runtime verb, and the app holds no other space grants —
+// anything matching IS a strip grant).
 
 import type { SandboxMount } from '@immediately-run/sdk';
 
