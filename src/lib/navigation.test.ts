@@ -74,3 +74,63 @@ describe('pickability + labels (G-OB-2 first-party rules)', () => {
     expect(pathFromSegments([])).toBe('');
   });
 });
+
+// The spaces leg (R3-499): strip-granted root recognition + the location a pick
+// returns for each source (G-OB-7 — the location names the SAME bytes the user
+// navigated: the repo WITH its ref, or the picked space's id).
+import { locationForPick, parseRepoLocator, spaceRootsOf } from './navigation';
+import type { SandboxMount } from '@immediately-run/sdk';
+
+// Fixture mounts arrive typed 'github' by default (the runtime verb's repo
+// mount) — the strip's space grant is exactly and only 'firestore' + id.
+const m = (over: Partial<SandboxMount>): SandboxMount => ({ path: '/mnt/x', type: 'github', ...over }) as SandboxMount;
+
+describe('spaceRootsOf', () => {
+  it('keeps firestore mounts carrying a spaceId; drops the repo mount and id-less mounts', () => {
+    const roots = spaceRootsOf([
+      m({ type: 'github' }), // a pasted repo the user opened (the runtime verb)
+      m({ type: 'firestore' }), // no id — not a space root
+      m({ type: 'firestore', id: 'space-1', mode: 'ro', name: 'Team' }),
+    ]);
+    expect(roots.map((r) => r.id)).toEqual(['space-1']);
+  });
+});
+
+describe('parseRepoLocator', () => {
+  it('splits repo and ref at the FIRST @ (the host grammar); the default branch stays absent', () => {
+    expect(parseRepoLocator('github:acme/themes')).toEqual({ repo: 'github:acme/themes' });
+    expect(parseRepoLocator('github:acme/themes@v2')).toEqual({ repo: 'github:acme/themes', ref: 'v2' });
+    // A legal ref may itself contain '@' (isSafeMountSegment admits it): the
+    // host mounts ref 'v1@beta', and the location must name THAT ref — a
+    // last-'@' split would return coordinates the user never navigated (G-OB-7).
+    expect(parseRepoLocator('github:acme/themes@v1@beta')).toEqual({
+      repo: 'github:acme/themes',
+      ref: 'v1@beta',
+    });
+  });
+});
+
+
+describe('locationForPick (G-OB-7)', () => {
+  it('a repo pick names the repo AND its ref', () => {
+    expect(locationForPick({ kind: 'repo', locator: 'github:acme/themes@v2' }, 'themes/nord')).toEqual({
+      kind: 'repo',
+      repo: 'github:acme/themes',
+      ref: 'v2',
+      path: 'themes/nord',
+    });
+    expect(locationForPick({ kind: 'repo', locator: 'github:acme/themes' }, '')).toEqual({
+      kind: 'repo',
+      repo: 'github:acme/themes',
+      path: '',
+    });
+  });
+
+  it('a space pick names the space the strip granted', () => {
+    expect(locationForPick({ kind: 'space', spaceId: 'space-1' }, 'themes/nord')).toEqual({
+      kind: 'space',
+      spaceId: 'space-1',
+      path: 'themes/nord',
+    });
+  });
+});

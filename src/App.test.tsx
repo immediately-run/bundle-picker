@@ -44,6 +44,10 @@ vi.mock('@immediately-run/sdk', () => ({
   completeTask: completeTaskMock,
   mount: vi.fn(async () => ({ id: 'github:o/r@main', path: '/mnt/x' }) as unknown as SandboxMount),
   openFs: () => fakeFs,
+  // R3-499's spaces leg reads the frame's mounts (the strip's grants). No strip
+  // in these tests: empty, static.
+  useMounts: () => [] as SandboxMount[],
+  getMounts: () => [] as SandboxMount[],
 }));
 
 // themes/nord carries a `kind: "theme"` marker; themes/plain does not.

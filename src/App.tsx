@@ -6,18 +6,27 @@
 // authority. The host independently re-probes the pick (G-OB-7); our job is an
 // honest, bounded UI.
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { cancelTask, completeTask, mount, openFs, useTaskInput, type SandboxMount } from '@immediately-run/sdk';
+import { cancelTask, completeTask, mount, openFs, useMounts, useTaskInput, type SandboxMount } from '@immediately-run/sdk';
 import {
   MAX_DEPTH,
+  locationForPick,
   navigationStep,
   pathFromSegments,
   pickable,
+  spaceRootsOf,
+  type PickerSource,
   type RevealedEntry,
   type StepResult,
 } from './lib/navigation';
 
 interface PickerState {
   mount: SandboxMount | null;
+  /** Identity token of the LATEST issued navigation; a resolving listing
+   *  applies only when it still holds the token (staleness guard). */
+  navToken: object;
+  /** What `mount` is: the pasted repo, or a space the user picked in the host's
+   *  spaces strip (announced mid-task, `ro`, dies with the invocation). */
+  source: PickerSource | null;
   /** The repo locator the user pasted (`github:ns/repo[@ref]`). */
   locator: string;
   segments: string[];
@@ -60,6 +69,8 @@ export default function App() {
   );
   const [state, setState] = useState<PickerState>({
     mount: null,
+    navToken: {},
+    source: null,
     locator: '',
     segments: [],
     step: null,
@@ -68,14 +79,41 @@ export default function App() {
     done: false,
   });
 
+  // The spaces leg (spec §4): the host's spaces strip pushes a scoped `ro`
+  // navigation root into this frame per pick, announced as an ordinary
+  // mount-add; `useMounts()` is how we see it. We never enumerate spaces — the
+  // strip (host chrome) did that; we navigate only what we were handed.
+  const mounts = useMounts();
+  const spaceRoots = useMemo(() => spaceRootsOf(mounts), [mounts]);
+
+  // A granted root can vanish mid-task (the space was unshared — the host
+  // tears the mount down within one snapshot). Derived at RENDER, not an
+  // effect: while the navigated root is gone the nav is not rendered and the
+  // loss is named; in-flight listings of the dead root are dropped by the
+  // token + the still-held check in loadStep (its reads reject at the revoked
+  // port anyway).
+  const currentSpaceId = state.source?.kind === 'space' ? state.source.spaceId : null;
+  const currentRootGone = currentSpaceId !== null && !spaceRoots.some((m) => m.id === currentSpaceId);
+  const shownError = currentRootGone ? 'That space is no longer available.' : state.error;
+
+  // Staleness: every navigation issues a fresh token, and a resolving listing
+  // applies only while it still holds it — a slow read of space A must never
+  // render under space B's source (a pick would then return B's spaceId with
+  // A's path — the misdirection class the host's G-OB-7 re-probe exists to
+  // catch, and this app refuses to produce in the first place). A REVOKED
+  // root's late reads need no check here: the host's export boundary rejects
+  // them terminally, they land in the catch, and the render-derived
+  // `currentRootGone` wording ('no longer available') is what the user sees.
   const loadStep = useCallback(
     async (m: SandboxMount, segments: string[]) => {
-      setState((s) => ({ ...s, busy: 'listing', error: null }));
+      const token = {};
+      setState((s) => ({ ...s, navToken: token, busy: 'listing', error: null }));
       try {
         const step = await navigationStep(openFs(m), pathFromSegments(segments), segments.length);
-        setState((s) => ({ ...s, segments, step, busy: null }));
+        setState((s) => (s.navToken === token ? { ...s, segments, step, busy: null } : s));
       } catch (e) {
-        setState((s) => ({ ...s, busy: null, error: String((e as Error)?.message ?? e) }));
+        const message = String((e as Error)?.message ?? e);
+        setState((s) => (s.navToken === token ? { ...s, busy: null, error: message } : s));
       }
     },
     [],
@@ -84,17 +122,33 @@ export default function App() {
   const openRepo = useCallback(async () => {
     const locator = state.locator.trim();
     if (!locator) return;
-    setState((s) => ({ ...s, busy: 'mounting', error: null }));
+    // Rotate the staleness token and drop the previous tree NOW: a listing
+    // still in flight from the old source must not resolve mid-mount (it would
+    // clobber busy:'mounting' and re-enable the controls — R-IX-2 — and paint
+    // the old root's entries over the incoming one).
+    setState((s) => ({ ...s, navToken: {}, step: null, busy: 'mounting', error: null }));
     try {
       // The host's runtime mount verb: `ro` mount + per-repo consent (L1).
       const m = await mount(locator);
-      setState((s) => ({ ...s, mount: m, segments: [], step: null, busy: null }));
+      setState((s) => ({ ...s, mount: m, source: { kind: 'repo', locator }, segments: [], step: null, busy: null }));
       await loadStep(m, []);
     } catch (e) {
       const err = e as Error & { code?: string };
       setState((s) => ({ ...s, busy: null, error: err.code ? `${err.code}: ${err.message}` : err.message }));
     }
   }, [state.locator, loadStep]);
+
+  // Navigate a strip-granted space root (the host already consented this pick —
+  // the strip IS the user's gesture; nothing here prompts again).
+  const openSpace = useCallback(
+    (m: SandboxMount) => {
+      const spaceId = m.id;
+      if (typeof spaceId !== 'string' || state.done) return;
+      setState((s) => ({ ...s, mount: m, source: { kind: 'space', spaceId }, segments: [], step: null, error: null }));
+      void loadStep(m, []);
+    },
+    [loadStep, state.done],
+  );
 
   const enter = useCallback(
     (entry: RevealedEntry) => {
@@ -114,15 +168,16 @@ export default function App() {
 
   const pick = useCallback(
     (entry: RevealedEntry) => {
-      if (!pickable(entry, kinds) || !state.mount) return;
+      if (!pickable(entry, kinds) || !state.mount || !state.source) return;
       const bundlePath = pathFromSegments([...state.segments, entry.name]);
-      // ONE pick = ONE bundle (spec §3): the location names the picked directory.
-      completeTask({
-        location: { kind: 'repo', repo: state.locator.replace(/@[^@/]*$/, ''), path: bundlePath },
-      });
+      // ONE pick = ONE bundle (spec §3): the location names the picked directory
+      // under the source it was actually navigated from (repo — with its ref —
+      // or the strip-granted space), so the host's re-probe checks the SAME
+      // bytes the user saw (G-OB-7).
+      completeTask({ location: locationForPick(state.source, bundlePath) });
       setState((s) => ({ ...s, done: true }));
     },
-    [state.segments, state.mount, state.locator, kinds],
+    [state.segments, state.mount, state.source, kinds],
   );
 
   // No invocation yet: say so, with an escape — never the generic picker chrome,
@@ -162,13 +217,37 @@ export default function App() {
         </button>
       </section>
 
-      {state.error && <p className="bp-error" role="alert">{state.error}</p>}
+      {spaceRoots.length > 0 && (
+        <section className="bp-spaces" aria-label="Spaces you picked">
+          <p className="bp-spaces-sub">From your spaces (read-only, this task only):</p>
+          <ul className="bp-spaces-list">
+            {spaceRoots.map((m) => (
+              <li key={m.id}>
+                <button
+                  type="button"
+                  onClick={() => openSpace(m)}
+                  disabled={state.done || state.busy !== null}
+                  aria-current={state.source?.kind === 'space' && state.source.spaceId === m.id ? 'true' : undefined}
+                >
+                  {/* Two nameless spaces must not render identical buttons —
+                      fall back to the mount's id, not a constant. */}
+                  {m.name ?? m.id ?? 'a granted root'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {shownError && <p className="bp-error" role="alert">{shownError}</p>}
       {state.busy === 'listing' && <p className="bp-busy">Listing…</p>}
 
-      {state.step && (
+      {state.step && !currentRootGone && (
         <section className="bp-nav" aria-busy={state.busy === 'listing'}>
           <nav className="bp-crumbs" aria-label="Location">
-            <button type="button" onClick={() => jump(0)}>root</button>
+            <button type="button" onClick={() => jump(0)}>
+              {state.mount?.name ?? 'root'}
+            </button>
             {state.segments.map((seg, i) => (
               <button key={i} type="button" onClick={() => jump(i + 1)}>
                 {seg}
