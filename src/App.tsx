@@ -5,8 +5,8 @@
 // by marker `kind`, and complete with ONE `{ location }` — a pointer, never
 // authority. The host independently re-probes the pick (G-OB-7); our job is an
 // honest, bounded UI.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { cancelTask, completeTask, mount, openFs, useMounts, useTaskInput, type SandboxMount } from '@immediately-run/sdk';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { cancelTask, completeTask, getMounts, mount, openFs, useMounts, useTaskInput, type SandboxMount } from '@immediately-run/sdk';
 import {
   MAX_DEPTH,
   locationForPick,
@@ -21,6 +21,9 @@ import {
 
 interface PickerState {
   mount: SandboxMount | null;
+  /** Identity token of the LATEST issued navigation; a resolving listing
+   *  applies only when it still holds the token (staleness guard). */
+  navToken: object;
   /** What `mount` is: the pasted repo, or a space the user picked in the host's
    *  spaces strip (announced mid-task, `ro`, dies with the invocation). */
   source: PickerSource | null;
@@ -66,6 +69,7 @@ export default function App() {
   );
   const [state, setState] = useState<PickerState>({
     mount: null,
+    navToken: {},
     source: null,
     locator: '',
     segments: [],
@@ -83,27 +87,38 @@ export default function App() {
   const spaceRoots = useMemo(() => spaceRootsOf(mounts), [mounts]);
 
   // A granted root can vanish mid-task (the space was unshared — the host
-  // tears the mount down within one snapshot). If we were navigating it, say
-  // so and reset rather than leaving a dead tree on screen.
+  // tears the mount down within one snapshot). Derived at RENDER, not an
+  // effect: while the navigated root is gone the nav is not rendered and the
+  // loss is named; in-flight listings of the dead root are dropped by the
+  // token + the still-held check in loadStep (its reads reject at the revoked
+  // port anyway).
   const currentSpaceId = state.source?.kind === 'space' ? state.source.spaceId : null;
-  useEffect(() => {
-    if (currentSpaceId && !spaceRoots.some((m) => m.id === currentSpaceId)) {
-      setState((s) =>
-        s.source?.kind === 'space'
-          ? { ...s, mount: null, source: null, segments: [], step: null, error: 'That space is no longer available.' }
-          : s,
-      );
-    }
-  }, [spaceRoots, currentSpaceId]);
+  const currentRootGone = currentSpaceId !== null && !spaceRoots.some((m) => m.id === currentSpaceId);
+  const shownError = currentRootGone ? 'That space is no longer available.' : state.error;
 
+  // Staleness: every navigation issues a fresh token, and a resolving listing
+  // applies only while it still holds it AND its mount is still held — a slow
+  // read of space A must never render under space B's source (a pick would
+  // then return B's spaceId with A's path — the misdirection class the host's
+  // G-OB-7 re-probe exists to catch, and this app refuses to produce in the
+  // first place), and a revoked root's late reads land nowhere.
   const loadStep = useCallback(
     async (m: SandboxMount, segments: string[]) => {
-      setState((s) => ({ ...s, busy: 'listing', error: null }));
+      const token = {};
+      setState((s) => ({ ...s, navToken: token, busy: 'listing', error: null }));
       try {
         const step = await navigationStep(openFs(m), pathFromSegments(segments), segments.length);
-        setState((s) => ({ ...s, segments, step, busy: null }));
+        const stillHeld = getMounts().some((g) => g.path === m.path);
+        setState((s) => (s.navToken === token && stillHeld ? { ...s, segments, step, busy: null } : { ...s, busy: s.navToken === token ? null : s.busy }));
       } catch (e) {
-        setState((s) => ({ ...s, busy: null, error: String((e as Error)?.message ?? e) }));
+        const message = String((e as Error)?.message ?? e);
+        // A failure on a mount that is already gone is the revocation path —
+        // the derived 'no longer available' wording covers it; don't overwrite
+        // it with a raw port error.
+        const stillHeld = getMounts().some((g) => g.path === m.path);
+        setState((s) =>
+          s.navToken !== token ? s : stillHeld ? { ...s, busy: null, error: message } : { ...s, busy: null },
+        );
       }
     },
     [],
@@ -128,8 +143,9 @@ export default function App() {
   // the strip IS the user's gesture; nothing here prompts again).
   const openSpace = useCallback(
     (m: SandboxMount) => {
-      if (typeof m.id !== 'string' || state.done) return;
-      setState((s) => ({ ...s, mount: m, source: { kind: 'space', spaceId: m.id! }, segments: [], step: null, error: null }));
+      const spaceId = m.id;
+      if (typeof spaceId !== 'string' || state.done) return;
+      setState((s) => ({ ...s, mount: m, source: { kind: 'space', spaceId }, segments: [], step: null, error: null }));
       void loadStep(m, []);
     },
     [loadStep, state.done],
@@ -211,10 +227,12 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => openSpace(m)}
-                  disabled={state.done || state.busy === 'mounting'}
+                  disabled={state.done || state.busy !== null}
                   aria-current={state.source?.kind === 'space' && state.source.spaceId === m.id ? 'true' : undefined}
                 >
-                  {m.name ?? 'A space'}
+                  {/* Two nameless spaces must not render identical buttons —
+                      fall back to the mount's id, not a constant. */}
+                  {m.name ?? m.id ?? 'a granted root'}
                 </button>
               </li>
             ))}
@@ -222,10 +240,10 @@ export default function App() {
         </section>
       )}
 
-      {state.error && <p className="bp-error" role="alert">{state.error}</p>}
+      {shownError && <p className="bp-error" role="alert">{shownError}</p>}
       {state.busy === 'listing' && <p className="bp-busy">Listing…</p>}
 
-      {state.step && (
+      {state.step && !currentRootGone && (
         <section className="bp-nav" aria-busy={state.busy === 'listing'}>
           <nav className="bp-crumbs" aria-label="Location">
             <button type="button" onClick={() => jump(0)}>

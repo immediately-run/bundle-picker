@@ -98,7 +98,10 @@ export const pathFromSegments = (segs: readonly string[]): string => segs.filter
 
 import type { SandboxMount } from '@immediately-run/sdk';
 
-/** The mounts the host's spaces strip has granted this invocation. */
+/** The mounts the host's spaces strip has granted this invocation. The
+ *  invariant that makes the filter sound: this app requests NO space/settings
+ *  mounts of its own (it never calls mountSpace/requestSpace), so the only
+ *  firestore mounts carrying a spaceId that can arrive are the strip's grants. */
 export const spaceRootsOf = (mounts: readonly SandboxMount[]): SandboxMount[] =>
   mounts.filter((m) => m.type === 'firestore' && typeof m.id === 'string' && m.id.length > 0);
 
@@ -107,13 +110,17 @@ export type PickerSource = { kind: 'repo'; locator: string } | { kind: 'space'; 
 
 /** Split `github:ns/repo[@ref]` into the location's `repo` + optional `ref`
  *  (the ref rides along — navigating a pinned ref but returning the default
- *  branch would misdescribe the pick, G-OB-7). */
+ *  branch would misdescribe the pick, G-OB-7).
+ *
+ *  The split mirrors the host's `parseGithubLocator` (site-main mountUri.ts)
+ *  EXACTLY — the FIRST '@': a legal ref may itself contain '@' (`v1@beta`),
+ *  and only the first split names the ref the host actually mounted. A
+ *  last-'@' split would return a location naming coordinates the user never
+ *  navigated, and the G-OB-7 re-probe would check those. */
 export const parseRepoLocator = (locator: string): { repo: string; ref?: string } => {
-  const at = locator.lastIndexOf('@');
-  if (at > locator.indexOf('/')) {
-    return { repo: locator.slice(0, at), ref: locator.slice(at + 1) };
-  }
-  return { repo: locator };
+  const at = locator.indexOf('@');
+  if (at === -1) return { repo: locator };
+  return { repo: locator.slice(0, at), ref: locator.slice(at + 1) };
 };
 
 /** The `BundleLocation` for a pick under `source` at `bundlePath` ('' = root). */
