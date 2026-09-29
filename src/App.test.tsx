@@ -4,7 +4,7 @@
 // round-trip: the one-shot `useMemo(getTaskInput)` read froze `kinds` at [] —
 // "Open a bundle", every marker-bearing directory unpickable, forever).
 //
-// The SDK is mocked with the REAL hook's semantics (state + listener + replay)
+// The SDK is mocked with the real hook's semantics (state + listener + replay)
 // over a controllable store: with the old one-shot read the late delivery in
 // the first test could never re-render the component, and the test fails.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -37,7 +37,7 @@ vi.mock('@immediately-run/sdk', () => ({
     }, []);
     return input;
   },
-  // Kept faithful so the REGRESSION is what fails this suite: the old code read
+  // Kept faithful so the regression is what fails this suite: the old code read
   // this once in a useMemo and could never see `deliver()` after first render.
   getTaskInput: () => store.current,
   cancelTask: vi.fn(),
