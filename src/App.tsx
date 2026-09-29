@@ -6,7 +6,7 @@
 // authority. The host independently re-probes the pick (G-OB-7); our job is an
 // honest, bounded UI.
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { cancelTask, completeTask, getMounts, mount, openFs, useMounts, useTaskInput, type SandboxMount } from '@immediately-run/sdk';
+import { cancelTask, completeTask, mount, openFs, useMounts, useTaskInput, type SandboxMount } from '@immediately-run/sdk';
 import {
   MAX_DEPTH,
   locationForPick,
@@ -97,28 +97,23 @@ export default function App() {
   const shownError = currentRootGone ? 'That space is no longer available.' : state.error;
 
   // Staleness: every navigation issues a fresh token, and a resolving listing
-  // applies only while it still holds it AND its mount is still held — a slow
-  // read of space A must never render under space B's source (a pick would
-  // then return B's spaceId with A's path — the misdirection class the host's
-  // G-OB-7 re-probe exists to catch, and this app refuses to produce in the
-  // first place), and a revoked root's late reads land nowhere.
+  // applies only while it still holds it — a slow read of space A must never
+  // render under space B's source (a pick would then return B's spaceId with
+  // A's path — the misdirection class the host's G-OB-7 re-probe exists to
+  // catch, and this app refuses to produce in the first place). A REVOKED
+  // root's late reads need no check here: the host's export boundary rejects
+  // them terminally, they land in the catch, and the render-derived
+  // `currentRootGone` wording ('no longer available') is what the user sees.
   const loadStep = useCallback(
     async (m: SandboxMount, segments: string[]) => {
       const token = {};
       setState((s) => ({ ...s, navToken: token, busy: 'listing', error: null }));
       try {
         const step = await navigationStep(openFs(m), pathFromSegments(segments), segments.length);
-        const stillHeld = getMounts().some((g) => g.path === m.path);
-        setState((s) => (s.navToken === token && stillHeld ? { ...s, segments, step, busy: null } : { ...s, busy: s.navToken === token ? null : s.busy }));
+        setState((s) => (s.navToken === token ? { ...s, segments, step, busy: null } : s));
       } catch (e) {
         const message = String((e as Error)?.message ?? e);
-        // A failure on a mount that is already gone is the revocation path —
-        // the derived 'no longer available' wording covers it; don't overwrite
-        // it with a raw port error.
-        const stillHeld = getMounts().some((g) => g.path === m.path);
-        setState((s) =>
-          s.navToken !== token ? s : stillHeld ? { ...s, busy: null, error: message } : { ...s, busy: null },
-        );
+        setState((s) => (s.navToken === token ? { ...s, busy: null, error: message } : s));
       }
     },
     [],
