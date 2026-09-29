@@ -5,8 +5,8 @@
 // by marker `kind`, and complete with ONE `{ location }` — a pointer, never
 // authority. The host independently re-probes the pick (G-OB-7); our job is an
 // honest, bounded UI.
-import { useCallback, useMemo, useState } from 'react';
-import { cancelTask, completeTask, getTaskInput, mount, openFs, type SandboxMount } from '@immediately-run/sdk';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { cancelTask, completeTask, mount, openFs, useTaskInput, type SandboxMount } from '@immediately-run/sdk';
 import {
   MAX_DEPTH,
   navigationStep,
@@ -27,8 +27,33 @@ interface PickerState {
   done: boolean;
 }
 
+/** The chrome both render states share: the head block and the Cancel footer. */
+function Chrome({ title, sub, done, children }: { title: string; sub: ReactNode; done?: boolean; children?: ReactNode }) {
+  return (
+    <main className="bp-root">
+      <header className="bp-head">
+        <h1>{title}</h1>
+        {sub}
+      </header>
+      {children}
+      <footer className="bp-foot">
+        <button type="button" className="bp-cancel" onClick={() => cancelTask()} disabled={done}>
+          Cancel
+        </button>
+      </footer>
+    </main>
+  );
+}
+
 export default function App() {
-  const input = useMemo(() => getTaskInput(), []);
+  // The invocation arrives as a host→frame `task-input` push whose delivery is
+  // observed-unreliable at mount (site-main's taskInputDelivery, R3-550 — the
+  // replayable poll is R3-787). Read it reactively (`useTaskInput`, the SDK's
+  // hook for exactly this) so a delivery landing after first render still
+  // reaches the UI; a one-shot `getTaskInput()` in a useMemo froze `kinds` at
+  // [] forever and rendered every marker-bearing directory unpickable (found
+  // live on the venue, R3-518's round-trip 2026-09-29).
+  const input = useTaskInput();
   const kinds: readonly string[] = useMemo(
     () => (Array.isArray((input?.params as { kinds?: unknown })?.kinds) ? ((input?.params as { kinds?: string[] }).kinds ?? []) : []),
     [input],
@@ -100,13 +125,29 @@ export default function App() {
     [state.segments, state.mount, state.locator, kinds],
   );
 
-  return (
-    <main className="bp-root">
-      <header className="bp-head">
-        <h1>Open {kinds.join(' / ') || 'a bundle'}</h1>
-        <p className="bp-sub">Pick one bundle of a requested kind. Everything else stays where it is.</p>
-      </header>
+  // No invocation yet: say so, with an escape — never the generic picker chrome,
+  // which made a dead/late invocation indistinguishable from `kinds: []`
+  // (nothing pickable, no explanation). Off-host (`vite dev`) this state simply
+  // persists: there is no host to invoke this app as a callee.
+  if (input === null) {
+    return (
+      <Chrome
+        title="Open a bundle"
+        sub={
+          <p className="bp-sub" role="status">
+            Waiting for the invocation…
+          </p>
+        }
+      />
+    );
+  }
 
+  return (
+    <Chrome
+      title={`Open ${kinds.join(' / ') || 'a bundle'}`}
+      sub={<p className="bp-sub">Pick one bundle of a requested kind. Everything else stays where it is.</p>}
+      done={state.done}
+    >
       <section className="bp-paste">
         <input
           value={state.locator}
@@ -159,12 +200,6 @@ export default function App() {
           </ul>
         </section>
       )}
-
-      <footer className="bp-foot">
-        <button type="button" className="bp-cancel" onClick={() => cancelTask()} disabled={state.done}>
-          Cancel
-        </button>
-      </footer>
-    </main>
+    </Chrome>
   );
 }
