@@ -11,8 +11,12 @@ bounded UI.
 - Navigation is bounded: ≤ 256 children probed / ≤ 100 rendered per step, depth
   ≤ 16 (`src/lib/navigation.ts`, tested — G-OB-2). Never a tree scan.
 - Labels come from the marker's `kind`, never a task name.
-- The spaces leg (host-drawn strip) is specified but lands with the host-side
-  follow-up; this app navigates whatever roots it holds (`getMounts()`).
+- The spaces leg (host-drawn strip, spec §4): the host strip grants this
+  instance a scoped `ro` navigation root per picked space, announced mid-task
+  as an ordinary `mount-add`; the app surfaces those roots (`spaceRootsOf` over
+  `useMounts()`) and a pick under one returns `{ kind: 'space', spaceId, path }`
+  (`locationForPick`). The app never enumerates spaces — it navigates only the
+  roots it was handed.
 
 ## Commands
 

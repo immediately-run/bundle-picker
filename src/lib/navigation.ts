@@ -86,3 +86,38 @@ export const pickable = (entry: RevealedEntry, kinds: readonly string[]): boolea
 
 /** `themes/nord` from ['themes','nord'] — the breadcrumb → BundleLocation path. */
 export const pathFromSegments = (segs: readonly string[]): string => segs.filter((s) => s.length > 0).join('/');
+
+// ── The spaces leg (R3-499's remainder — OPEN_BUNDLE_SPEC §4) ────────────────
+//
+// The host-drawn spaces strip grants this instance a scoped `ro` navigation
+// root per picked space, announced mid-task as an ordinary mount-add. The app
+// learns of it through `useMounts()`: a strip grant is recognizably a
+// firestore mount carrying its spaceId as `id` (the picker's own repo mount is
+// type `repo`, and it holds no other space grants — anything matching IS a
+// strip grant).
+
+import type { SandboxMount } from '@immediately-run/sdk';
+
+/** The mounts the host's spaces strip has granted this invocation. */
+export const spaceRootsOf = (mounts: readonly SandboxMount[]): SandboxMount[] =>
+  mounts.filter((m) => m.type === 'firestore' && typeof m.id === 'string' && m.id.length > 0);
+
+/** What the user is navigating: the pasted repo, or a strip-granted space. */
+export type PickerSource = { kind: 'repo'; locator: string } | { kind: 'space'; spaceId: string };
+
+/** Split `github:ns/repo[@ref]` into the location's `repo` + optional `ref`
+ *  (the ref rides along — navigating a pinned ref but returning the default
+ *  branch would misdescribe the pick, G-OB-7). */
+export const parseRepoLocator = (locator: string): { repo: string; ref?: string } => {
+  const at = locator.lastIndexOf('@');
+  if (at > locator.indexOf('/')) {
+    return { repo: locator.slice(0, at), ref: locator.slice(at + 1) };
+  }
+  return { repo: locator };
+};
+
+/** The `BundleLocation` for a pick under `source` at `bundlePath` ('' = root). */
+export const locationForPick = (source: PickerSource, bundlePath: string) =>
+  source.kind === 'repo'
+    ? { kind: 'repo' as const, ...parseRepoLocator(source.locator), path: bundlePath }
+    : { kind: 'space' as const, spaceId: source.spaceId, path: bundlePath };
