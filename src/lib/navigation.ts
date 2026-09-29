@@ -99,9 +99,10 @@ export const pathFromSegments = (segs: readonly string[]): string => segs.filter
 import type { SandboxMount } from '@immediately-run/sdk';
 
 /** The mounts the host's spaces strip has granted this invocation. The
- *  invariant that makes the filter sound: this app requests NO space/settings
- *  mounts of its own (it never calls mountSpace/requestSpace), so the only
- *  firestore mounts carrying a spaceId that can arrive are the strip's grants. */
+ *  invariant that makes the filter sound: this app requests NO space mounts of
+ *  its own (it never calls mountSpace/requestSpace), and the pasted repo
+ *  arrives typed 'github' (the runtime verb), so a firestore mount carrying a
+ *  spaceId IS the strip's grant — nothing else can produce one here. */
 export const spaceRootsOf = (mounts: readonly SandboxMount[]): SandboxMount[] =>
   mounts.filter((m) => m.type === 'firestore' && typeof m.id === 'string' && m.id.length > 0);
 

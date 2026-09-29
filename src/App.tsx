@@ -127,7 +127,11 @@ export default function App() {
   const openRepo = useCallback(async () => {
     const locator = state.locator.trim();
     if (!locator) return;
-    setState((s) => ({ ...s, busy: 'mounting', error: null }));
+    // Rotate the staleness token and drop the previous tree NOW: a listing
+    // still in flight from the old source must not resolve mid-mount (it would
+    // clobber busy:'mounting' and re-enable the controls — R-IX-2 — and paint
+    // the old root's entries over the incoming one).
+    setState((s) => ({ ...s, navToken: {}, step: null, busy: 'mounting', error: null }));
     try {
       // The host's runtime mount verb: `ro` mount + per-repo consent (L1).
       const m = await mount(locator);
