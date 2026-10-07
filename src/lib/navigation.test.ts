@@ -1,6 +1,6 @@
 // G-OB-2 — navigation never scans, depth AND width bounded (OPEN_BUNDLE_SPEC §3).
 // A 10^4-child directory probes ≤ MAX_PROBE; a deep tree stops at MAX_DEPTH;
-// labels come from `kind`, never task names; pickability = kind ∈ kinds.
+// the marker's `kind` gates pickability and rides the chip — never a task name.
 import { describe, expect, it } from 'vitest';
 import { MAX_DEPTH, MAX_PROBE, MARKER_FILE, navigationStep, parseMarkerKind, pathFromSegments, pickable } from './navigation';
 import type { MountFs } from '@immediately-run/sdk';
@@ -39,7 +39,7 @@ describe('navigationStep bounds (G-OB-2)', () => {
     await expect(navigationStep(mkFs({}), '', MAX_DEPTH + 1)).rejects.toMatchObject({ code: 'depth-exceeded' });
   });
 
-  it('reveals markers: label from kind, directories first, no marker probe on files', async () => {
+  it('reveals markers: kind on the directory, directories first, no marker probe on files', async () => {
     const fs = mkFs(
       { readme: 'file', plain: 'dir', nord: 'dir' },
       { [`nord/${MARKER_FILE}`]: JSON.stringify({ kind: 'theme' }), [`plain/${MARKER_FILE}`]: 'not json' },
@@ -53,7 +53,7 @@ describe('navigationStep bounds (G-OB-2)', () => {
   });
 });
 
-describe('pickability + labels (G-OB-2 first-party rules)', () => {
+describe('pickability + the kind reveal (G-OB-2 first-party rules)', () => {
   it('a directory is pickable iff its kind ∈ kinds', () => {
     const e = { name: 'nord', isDir: true, kind: 'theme' };
     expect(pickable(e, ['theme'])).toBe(true);
