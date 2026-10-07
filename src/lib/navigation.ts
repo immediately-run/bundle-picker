@@ -21,7 +21,9 @@ export const MARKER_FILE = 'immediately.run.json';
 export interface RevealedEntry {
   name: string;
   isDir: boolean;
-  /** The marker's `kind` when the child directory carries one — the LABEL source. */
+  /** The marker's `kind` when the child directory carries one — the pickability
+   *  gate (a kind ∈ the invocation's kinds) and the chip's text (R3-1024: the
+   *  row's label is the entry name, the kind rides the `.bp-kind` chip). */
   kind?: string;
 }
 
