@@ -51,7 +51,8 @@ vi.mock('@immediately-run/sdk', () => ({
 }));
 
 // themes/nord carries a `kind: "theme"` marker; themes/plain does not.
-const fakeFs = {
+// R3-1024: `fakeFs` is reassignable — the three-theme test swaps in its own tree.
+const nordFs = {
   readdir: async (rel = '') => {
     if (rel === '') return [{ name: 'themes', kind: 'dir' as const }];
     if (rel === 'themes') return [{ name: 'nord', kind: 'dir' as const }, { name: 'plain', kind: 'dir' as const }];
@@ -63,12 +64,36 @@ const fakeFs = {
   },
 } as unknown as MountFs;
 
+/** The R3-1024 live shape: three theme bundles under themes/ — the repo the
+ *  drill found the defect on (three identical "Open this theme" buttons). */
+const threeThemeFs = {
+  readdir: async (rel = '') => {
+    if (rel === '') return [{ name: 'themes', kind: 'dir' as const }];
+    if (rel === 'themes')
+      return [
+        { name: 'a', kind: 'dir' as const },
+        { name: 'b', kind: 'dir' as const },
+        { name: 'c', kind: 'dir' as const },
+      ];
+    return [];
+  },
+  readFile: async (p: string) => {
+    if (p === 'themes/a/immediately.run.json') return JSON.stringify({ kind: 'theme' });
+    if (p === 'themes/b/immediately.run.json') return JSON.stringify({ kind: 'theme' });
+    if (p === 'themes/c/immediately.run.json') return JSON.stringify({ kind: 'theme' });
+    throw new Error('not found');
+  },
+} as unknown as MountFs;
+
+let fakeFs: MountFs = nordFs;
+
 import App from './App';
 
 beforeEach(() => {
   store.current = null;
   store.listeners.clear();
   completeTaskMock.mockClear();
+  fakeFs = nordFs;
 });
 afterEach(cleanup);
 
@@ -95,9 +120,13 @@ describe('the invocation read (R3-826)', () => {
     await screen.findByRole('button', { name: 'themes/' });
     fireEvent.click(screen.getByRole('button', { name: 'themes/' }));
 
-    // nord's marker kind ∈ kinds → "Open this theme"; plain has no marker → not pickable.
-    const pick = await screen.findByRole('button', { name: 'Open this theme' });
+    // nord's marker kind ∈ kinds → pickable, the button labelled by its NAME
+    // (R3-1024), the kind on the chip beside it; plain has no marker → not pickable.
+    const pick = await screen.findByRole('button', { name: 'nord' });
     expect(screen.queryByRole('button', { name: 'plain/' })).toBeTruthy();
+    // R3-1024: the kind chip now shows on the pickable row too (it always showed
+    // on non-pickable marker-bearing ones).
+    expect(document.querySelector('.bp-bundle .bp-kind')?.textContent).toBe('theme');
 
     fireEvent.click(pick);
     expect(completeTaskMock).toHaveBeenCalledWith({
@@ -110,5 +139,42 @@ describe('the invocation read (R3-826)', () => {
     expect(screen.getByRole('status').textContent).toContain('Waiting for the invocation');
     expect(screen.queryByLabelText('Repository location')).toBeNull();
     expect(document.querySelector('.bp-pick')).toBeNull();
+  });
+});
+
+// R3-1024 — found live during R3-978's drill: a repo with three theme bundles
+// rendered three identical "Open this theme" buttons; the reader could not tell
+// them apart. The pickable row's label is the entry NAME (the kind rides the
+// chip), so every pickable button is distinguishable by its accessible name.
+describe('the pickable row label (R3-1024)', () => {
+  it('three theme bundles under themes/ render three DISTINGUISHABLE buttons — the name is the label, the kind the chip', async () => {
+    fakeFs = threeThemeFs;
+    render(<App />);
+    act(() => deliver({ task: 'open-bundle', params: { kinds: ['theme'] } }));
+
+    fireEvent.change(screen.getByLabelText('Repository location'), { target: { value: 'github:o/r' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open repository' }));
+    await screen.findByRole('button', { name: 'themes/' });
+    fireEvent.click(screen.getByRole('button', { name: 'themes/' }));
+
+    // Three pickable buttons, each named by its own directory — never one
+    // accessible name three times over.
+    for (const name of ['a', 'b', 'c']) {
+      const btn = await screen.findByRole('button', { name });
+      expect(btn.className).toContain('bp-pick');
+    }
+    // The kind rides the chip on every pickable row (it already did on
+    // non-pickable marker-bearing ones).
+    expect(document.querySelectorAll('.bp-bundle .bp-kind')).toHaveLength(3);
+    for (const chip of document.querySelectorAll('.bp-bundle .bp-kind')) {
+      expect(chip.textContent).toBe('theme');
+    }
+
+    // Each pick still completes with its OWN path — the label and the pick
+    // agree on which bundle was chosen.
+    fireEvent.click(screen.getByRole('button', { name: 'b' }));
+    expect(completeTaskMock).toHaveBeenCalledWith({
+      location: { kind: 'repo', repo: 'github:o/r', path: 'themes/b' },
+    });
   });
 });
