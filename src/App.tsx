@@ -262,8 +262,13 @@ export default function App() {
               <li key={e.name} className={pickable(e, kinds) ? 'bp-bundle' : undefined}>
                 {e.isDir ? (
                   pickable(e, kinds) ? (
+                    // R3-1024: the NAME is the button's label, like the non-pickable
+                    // branch — a repo with themes/a, themes/b, themes/c must render
+                    // three distinguishable buttons, not three "Open this theme".
+                    // The kind rides the chip below, shown on every marker-bearing
+                    // directory (pickable or not).
                     <button type="button" className="bp-pick" onClick={() => pick(e)} disabled={state.done}>
-                      Open this {e.kind}
+                      {e.name}
                     </button>
                   ) : (
                     <button type="button" onClick={() => enter(e)} disabled={state.done}>
@@ -273,7 +278,7 @@ export default function App() {
                 ) : (
                   <span className="bp-file">{e.name}</span>
                 )}
-                {e.isDir && !pickable(e, kinds) && e.kind && <span className="bp-kind">{e.kind}</span>}
+                {e.isDir && e.kind && <span className="bp-kind">{e.kind}</span>}
               </li>
             ))}
           </ul>

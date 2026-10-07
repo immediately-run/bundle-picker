@@ -10,7 +10,8 @@ bounded UI.
 
 - Navigation is bounded: ≤ 256 children probed / ≤ 100 rendered per step, depth
   ≤ 16 (`src/lib/navigation.ts`, tested — G-OB-2). Never a tree scan.
-- Labels come from the marker's `kind`, never a task name.
+- Labels: the row's label is the entry NAME (pickable and not alike — R3-1024);
+  the marker's `kind` rides the `.bp-kind` chip, never a task name.
 - The spaces leg (host-drawn strip, spec §4): the host strip grants this
   instance a scoped `ro` navigation root per picked space, announced mid-task
   as an ordinary `mount-add`; the app surfaces those roots (`spaceRootsOf` over

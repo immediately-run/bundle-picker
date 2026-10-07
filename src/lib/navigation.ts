@@ -2,7 +2,8 @@
 //
 // The picker NEVER scans filesystems: one navigation step lists a directory's
 // immediate children (probe cap / render cap), reveals each child DIRECTORY's
-// `immediately.run.json` marker (label from `kind`, never a task name), and stops.
+// `immediately.run.json` marker (the kind gates pickability and rides the chip;
+// the row's label is the entry name, never a task name — R3-1024), and stops.
 // Numeric bounds are the spec's ("a bound with no number is not a bound"):
 // ≤ MAX_PROBE children probed, ≤ MAX_RENDER rendered, depth ≤ MAX_DEPTH.
 // A breach degrades (truncate + "showing first N") and surfaces — never silent.
@@ -21,7 +22,9 @@ export const MARKER_FILE = 'immediately.run.json';
 export interface RevealedEntry {
   name: string;
   isDir: boolean;
-  /** The marker's `kind` when the child directory carries one — the LABEL source. */
+  /** The marker's `kind` when the child directory carries one — the pickability
+   *  gate (a kind ∈ the invocation's kinds) and the chip's text (R3-1024: the
+   *  row's label is the entry name, the kind rides the `.bp-kind` chip). */
   kind?: string;
 }
 
